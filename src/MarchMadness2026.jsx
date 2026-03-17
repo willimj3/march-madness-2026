@@ -4,7 +4,8 @@ import {
   ScatterChart, Scatter, RadarChart, Radar, PolarGrid,
   PolarAngleAxis, PolarRadiusAxis, Cell, Legend, CartesianGrid
 } from "recharts";
-import { Search, Trophy, AlertTriangle, BarChart3, GitCompare } from "lucide-react";
+import { Search, Trophy, AlertTriangle, BarChart3, GitCompare, Share2, Loader2, Check } from "lucide-react";
+import { useBracket } from "./hooks/useBracket";
 
 // ─────────────────────────────────────────────────────────────
 // DATA LAYER
@@ -231,14 +232,19 @@ function generateSummary(t1, t2) {
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 
-export default function MarchMadness2026() {
+export default function MarchMadness2026({ sharedBracketId }) {
   const [tab, setTab] = useState("dashboard");
   const [compare1, setCompare1] = useState("");
   const [compare2, setCompare2] = useState("");
-  const [picks, setPicks] = useState({});
   const [search, setSearch] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("All");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const {
+    picks, setPicks, makePick, isReadOnly, ownerName, bracketId,
+    isSaving, lastSaved, displayName, setDisplayName, isLoading,
+  } = useBracket(sharedBracketId);
 
   const allTeamNames = TEAMS.filter(t => !t.firstFour).map(t => t.team).sort();
   const ffTeamNames = TEAMS.filter(t => t.firstFour).map(t => t.team);
@@ -260,34 +266,16 @@ export default function MarchMadness2026() {
     return [m.topTeam, m.botTeam];
   }
 
-  function makePick(key, team, region, round, slot) {
-    setPicks(prev => {
-      const next = { ...prev, [key]: team };
-      // Clear downstream picks that depended on this slot
-      const maxRounds = 7; // R1 through championship
-      for (let r = round + 1; r <= maxRounds; r++) {
-        const downSlot = Math.floor(slot / Math.pow(2, r - round));
-        const dk = getBracketKey(r <= 4 ? region : "FF", r, downSlot);
-        if (prev[dk] && !isStillValid(next, dk, r, downSlot, r <= 4 ? region : "FF")) {
-          delete next[dk];
-        }
-      }
-      return next;
+  const totalPicks = Object.keys(picks).length;
+
+  function shareBracket() {
+    if (!bracketId) return;
+    const url = `${window.location.origin}/bracket/${bracketId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     });
   }
-
-  function isStillValid(picksObj, key, round, slot, region) {
-    const picked = picksObj[key];
-    if (!picked) return true;
-    // Check if the picked team is still available in the feeder slots
-    const feeder1 = getBracketKey(region, round - 1, slot * 2);
-    const feeder2 = getBracketKey(region, round - 1, slot * 2 + 1);
-    const f1 = picksObj[feeder1];
-    const f2 = picksObj[feeder2];
-    return f1 === picked || f2 === picked;
-  }
-
-  const totalPicks = Object.keys(picks).length;
 
   function exportPicks() {
     let text = "March Madness 2026 — My Bracket Picks\n";
@@ -757,12 +745,12 @@ export default function MarchMadness2026() {
                               return (
                                 <button
                                   key={tIdx}
-                                  onClick={() => !isSlash && t && makePick(key, t, region, round, slot)}
-                                  disabled={isSlash || !t}
+                                  onClick={() => !isSlash && t && !isReadOnly && makePick(key, t, region, round, slot)}
+                                  disabled={isSlash || !t || isReadOnly}
                                   className={`w-full text-left px-3 py-1.5 text-xs border-b border-gray-800 last:border-b-0 transition-colors flex justify-between items-center ${
                                     isPicked
                                       ? "bg-[#ff6b35] text-white font-bold"
-                                      : isSlash
+                                      : isSlash || isReadOnly
                                         ? "text-gray-500 cursor-default"
                                         : "text-gray-300 hover:bg-[#1a2340] cursor-pointer"
                                   }`}
@@ -822,12 +810,12 @@ export default function MarchMadness2026() {
                     return (
                       <button
                         key={tIdx}
-                        onClick={() => t && makePick(key, t, "FF", 5, i)}
-                        disabled={!t}
+                        onClick={() => t && !isReadOnly && makePick(key, t, "FF", 5, i)}
+                        disabled={!t || isReadOnly}
                         className={`w-full text-left px-3 py-2 text-sm border-b border-gray-800 last:border-b-0 transition-colors ${
                           isPicked
                             ? "bg-[#ff6b35] text-white font-bold"
-                            : !t
+                            : !t || isReadOnly
                               ? "text-gray-600 cursor-default"
                               : "text-gray-300 hover:bg-[#1a2340] cursor-pointer"
                         }`}
@@ -851,12 +839,12 @@ export default function MarchMadness2026() {
                   return (
                     <button
                       key={tIdx}
-                      onClick={() => t && makePick(key, t, "FF", 6, 0)}
-                      disabled={!t}
+                      onClick={() => t && !isReadOnly && makePick(key, t, "FF", 6, 0)}
+                      disabled={!t || isReadOnly}
                       className={`w-full text-left px-3 py-2 text-sm border-b border-gray-800 last:border-b-0 transition-colors ${
                         isPicked
                           ? "bg-[#ffd700] text-[#1a1a2e] font-bold"
-                          : !t
+                          : !t || isReadOnly
                             ? "text-gray-600 cursor-default"
                             : "text-gray-300 hover:bg-[#1a2340] cursor-pointer"
                       }`}
@@ -882,11 +870,37 @@ export default function MarchMadness2026() {
 
     return (
       <div>
+        {isReadOnly && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-[#7b68ee]/20 border border-[#7b68ee] text-sm flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-[#7b68ee]" />
+            You're viewing <span className="font-bold text-white">{ownerName}</span>'s bracket (read-only)
+          </div>
+        )}
         <div className="flex justify-between items-center mb-6 flex-wrap gap-3">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <Trophy className="w-5 h-5 text-[#ffd700]" />
-            My Bracket
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Trophy className="w-5 h-5 text-[#ffd700]" />
+              {isReadOnly ? `${ownerName}'s Bracket` : "My Bracket"}
+            </h2>
+            {!isReadOnly && (
+              <input
+                type="text"
+                value={displayName}
+                onChange={e => setDisplayName(e.target.value)}
+                placeholder="Your name"
+                className="px-3 py-1 rounded-lg bg-[#16213e] border border-gray-700 text-white text-sm focus:outline-none focus:border-[#ff6b35] w-36"
+              />
+            )}
+            {!isReadOnly && (
+              <span className="text-xs text-gray-500">
+                {isSaving ? (
+                  <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Saving...</span>
+                ) : lastSaved ? (
+                  <span className="flex items-center gap-1 text-[#4ecca3]"><Check className="w-3 h-3" /> Saved</span>
+                ) : null}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-400">
               Picks made: <span className="text-white font-bold">{totalPicks}</span> / 63
@@ -894,18 +908,31 @@ export default function MarchMadness2026() {
             <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
               <div className="h-full bg-[#4ecca3] rounded-full transition-all" style={{ width: `${(totalPicks / 63) * 100}%` }} />
             </div>
-            <button
-              onClick={exportPicks}
-              className="px-4 py-2 bg-[#4ecca3] text-[#1a1a2e] rounded-lg text-sm font-medium hover:bg-[#3dbb92] transition-colors"
-            >
-              Export Picks
-            </button>
-            <button
-              onClick={() => setShowResetConfirm(true)}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
-            >
-              Reset
-            </button>
+            {!isReadOnly && (
+              <button
+                onClick={shareBracket}
+                className="px-4 py-2 bg-[#7b68ee] text-white rounded-lg text-sm font-medium hover:bg-[#6a58dd] transition-colors flex items-center gap-2"
+              >
+                <Share2 className="w-4 h-4" />
+                {copied ? "Copied!" : "Share"}
+              </button>
+            )}
+            {!isReadOnly && (
+              <button
+                onClick={exportPicks}
+                className="px-4 py-2 bg-[#4ecca3] text-[#1a1a2e] rounded-lg text-sm font-medium hover:bg-[#3dbb92] transition-colors"
+              >
+                Export Picks
+              </button>
+            )}
+            {!isReadOnly && (
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+              >
+                Reset
+              </button>
+            )}
           </div>
         </div>
 
@@ -915,7 +942,7 @@ export default function MarchMadness2026() {
               <h3 className="text-lg font-bold mb-2">Reset Bracket?</h3>
               <p className="text-gray-400 text-sm mb-4">This will clear all your picks. This cannot be undone.</p>
               <div className="flex gap-3">
-                <button onClick={() => { setPicks({}); setShowResetConfirm(false); }} className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700">
+                <button onClick={() => { setPicks({}); setShowResetConfirm(false); }} className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors">
                   Reset All
                 </button>
                 <button onClick={() => setShowResetConfirm(false)} className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg font-medium hover:bg-gray-600">
@@ -978,10 +1005,19 @@ export default function MarchMadness2026() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {tab === "dashboard" && renderDashboard()}
-        {tab === "upsets" && renderUpsetFinder()}
-        {tab === "compare" && renderCompare()}
-        {tab === "bracket" && renderBracket()}
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+            <Loader2 className="w-8 h-8 animate-spin mb-3" />
+            <p>Loading bracket...</p>
+          </div>
+        ) : (
+          <>
+            {tab === "dashboard" && renderDashboard()}
+            {tab === "upsets" && renderUpsetFinder()}
+            {tab === "compare" && renderCompare()}
+            {tab === "bracket" && renderBracket()}
+          </>
+        )}
       </div>
     </div>
   );
